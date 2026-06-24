@@ -1,0 +1,14 @@
+# Grafana dashboard provisioning — auto-loads JSON dashboards from disk.
+apiVersion: 1
+
+providers:
+  - name: Aegis
+    orgId: 1
+    folder: Aegis
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

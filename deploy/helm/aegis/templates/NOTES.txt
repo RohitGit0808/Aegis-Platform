@@ -1,0 +1,44 @@
+Aegis {{ .Chart.AppVersion }} has been deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Components:
+  - API deployment:    {{ include "aegis.fullname" . }}-api  ({{ if .Values.autoscaling.enabled }}autoscaled {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} on {{ .Values.autoscaling.targetCPUUtilizationPercentage }}% CPU{{ else }}{{ .Values.api.replicaCount }} replica(s){{ end }})
+  - Worker deployment: {{ if .Values.worker.enabled }}{{ include "aegis.fullname" . }}-worker ({{ .Values.worker.replicaCount }} replica(s)){{ else }}disabled (worker.enabled=false — inline dispatch only){{ end }}
+  - Service:           {{ include "aegis.fullname" . }}-api ({{ .Values.service.type }} :{{ .Values.service.port }})
+
+1. Check rollout status:
+
+   kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "aegis.fullname" . }}-api
+
+{{- if .Values.ingress.enabled }}
+
+2. Reach the API via the Ingress:
+{{- range .Values.ingress.hosts }}
+   https://{{ .host }}{{ (first .paths).path }}
+{{- end }}
+   API docs are served at /docs and the OpenAPI schema at /api/v1.
+{{- else }}
+
+2. The Ingress is disabled. Port-forward to reach the API locally:
+
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "aegis.fullname" . }}-api 8080:{{ .Values.service.port }}
+   open http://127.0.0.1:8080/docs
+{{- end }}
+
+3. Probe endpoints (used by Kubernetes):
+   - Liveness:  /healthz
+   - Readiness: /readyz
+   - Metrics:   /metrics (Prometheus)
+
+{{- if not .Values.secrets.existingSecret }}
+
+WARNING: This release created a chart-managed Secret with default values.
+         Override secrets.data.AEGIS_SECRET_KEY and AEGIS_ANTHROPIC_API_KEY,
+         or set secrets.existingSecret to reference a pre-provisioned Secret,
+         before exposing this deployment to production traffic.
+{{- end }}
+
+{{- if and .Values.worker.enabled (not .Values.secrets.data.AEGIS_REDIS_URL) (not .Values.secrets.existingSecret) }}
+
+NOTE: The worker is enabled but AEGIS_REDIS_URL is empty. arq requires Redis —
+      set secrets.data.AEGIS_REDIS_URL to a reachable Redis instance.
+{{- end }}

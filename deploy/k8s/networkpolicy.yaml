@@ -1,0 +1,115 @@
+# Default-deny baseline plus the minimum ingress/egress Aegis needs.
+# Assumes the CNI in use enforces NetworkPolicy (Calico, Cilium, etc.).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aegis-default-deny
+  namespace: aegis
+  labels:
+    app.kubernetes.io/name: aegis
+    app.kubernetes.io/part-of: aegis-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aegis-api
+  namespace: aegis
+  labels:
+    app.kubernetes.io/name: aegis
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: aegis-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: aegis
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # HTTP traffic from the ingress-nginx controller.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Prometheus scraping of /metrics.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # DNS resolution.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL.
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # Redis.
+    - ports:
+        - protocol: TCP
+          port: 6379
+    # Outbound HTTPS to the Anthropic API and OTLP collector.
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 4317
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aegis-worker
+  namespace: aegis
+  labels:
+    app.kubernetes.io/name: aegis
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: aegis-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: aegis
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    # DNS resolution.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL.
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # Redis (arq queue).
+    - ports:
+        - protocol: TCP
+          port: 6379
+    # Outbound HTTPS to the Anthropic API and OTLP collector.
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 4317

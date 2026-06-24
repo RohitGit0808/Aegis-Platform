@@ -1,0 +1,18 @@
+apiVersion: v2
+name: aegis
+description: Aegis — a distributed, AI-powered self-healing test-orchestration platform.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - testing
+  - self-healing
+  - orchestration
+  - fastapi
+  - ai
+home: https://github.com/rohit-saxena/aegis-platform
+sources:
+  - https://github.com/rohit-saxena/aegis-platform
+maintainers:
+  - name: Rohit Saxena
+    email: rohit.saxena@cognizant.com

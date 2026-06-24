@@ -1,0 +1,188 @@
+# ============================================================================
+# Aegis — full local/staging stack.
+#
+#   docker compose -f docker/docker-compose.yml up --build
+#
+# Brings up the API, an arq worker, Postgres, Redis, and the observability
+# trio (Prometheus, Grafana, Jaeger). The API and worker share one image built
+# from docker/Dockerfile with the repo root as build context.
+#
+# All application config is passed through AEGIS_-prefixed env vars that map
+# 1:1 onto aegis.core.config.Settings.
+# ============================================================================
+
+name: aegis
+
+# Reusable application environment shared by the API and worker services. Both
+# must agree on the same database, cache/queue, and tracing configuration.
+x-aegis-env: &aegis-env
+  AEGIS_ENVIRONMENT: staging
+  AEGIS_DEBUG: "false"
+  AEGIS_LOG_JSON: "true"
+  AEGIS_SECRET_KEY: change-me-in-production-please-use-a-long-random-string
+  AEGIS_DATABASE_URL: postgresql+asyncpg://aegis:aegis@db:5432/aegis
+  AEGIS_REDIS_URL: redis://redis:6379/0
+  # Self-healing falls back to heuristic-only mode when this is empty.
+  AEGIS_ANTHROPIC_API_KEY: ${AEGIS_ANTHROPIC_API_KEY:-}
+  # Observability — emit OTLP spans to the Jaeger collector over gRPC.
+  AEGIS_METRICS_ENABLED: "true"
+  AEGIS_TRACING_ENABLED: "true"
+  AEGIS_OTLP_ENDPOINT: http://jaeger:4317
+
+services:
+  # ------------------------------------------------------- DB migration (once)
+  # First service to use the image, so it carries the build. Applies the schema
+  # with Alembic before the API/worker start.
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: aegis:latest
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *aegis-env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - aegis
+    restart: "no"
+
+  # ------------------------------------------------------- Demo seed (once)
+  seed:
+    image: aegis:latest
+    command: ["aegis", "seed"]
+    environment:
+      <<: *aegis-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - aegis
+    restart: "no"
+
+  # ---------------------------------------------------------------------- API
+  api:
+    image: aegis:latest
+    environment:
+      <<: *aegis-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    networks:
+      - aegis
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------- Worker
+  worker:
+    # Reuse the API image — same code, different entrypoint. arq consumes jobs
+    # enqueued onto Redis by the API.
+    image: aegis:latest
+    command: ["arq", "aegis.workers.arq_worker.WorkerSettings"]
+    environment:
+      <<: *aegis-env
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - aegis
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- Postgres
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: aegis
+      POSTGRES_DB: aegis
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - aegis
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------- Redis
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - aegis
+    restart: unless-stopped
+
+  # -------------------------------------------------------------- Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+    networks:
+      - aegis
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------- Grafana
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - aegis
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------ Jaeger
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"     # OTLP gRPC receiver
+      - "4318:4318"     # OTLP HTTP receiver
+    networks:
+      - aegis
+    restart: unless-stopped
+
+networks:
+  aegis:
+    driver: bridge
+
+volumes:
+  db-data:
+  prometheus-data:
+  grafana-data:

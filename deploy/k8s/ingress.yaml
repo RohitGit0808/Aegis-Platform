@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aegis
+  namespace: aegis
+  labels:
+    app.kubernetes.io/name: aegis
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: aegis-platform
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # WebSocket support for the live run stream (WS /api/v1/runs/{id}/stream).
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # cert-manager (optional): issue a TLS cert automatically.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - aegis.example.com
+      secretName: aegis-tls
+  rules:
+    - host: aegis.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aegis-api
+                port:
+                  number: 80

@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegis-config
+  namespace: aegis
+  labels:
+    app.kubernetes.io/name: aegis
+    app.kubernetes.io/component: config
+    app.kubernetes.io/part-of: aegis-platform
+data:
+  # Non-secret runtime configuration. All keys map to AEGIS_* env vars
+  # consumed by pydantic-settings (see src/aegis/core/config.py).
+  AEGIS_APP_NAME: "Aegis"
+  AEGIS_ENVIRONMENT: "production"
+  AEGIS_DEBUG: "false"
+  AEGIS_API_V1_PREFIX: "/api/v1"
+
+  # Logging
+  AEGIS_LOG_LEVEL: "INFO"
+  AEGIS_LOG_JSON: "true"
+
+  # Security (non-secret tunables; the signing key itself lives in the Secret)
+  AEGIS_JWT_ALGORITHM: "HS256"
+  AEGIS_ACCESS_TOKEN_TTL_SECONDS: "900"
+  AEGIS_REFRESH_TOKEN_TTL_SECONDS: "1209600"
+
+  # Persistence (connection-pool sizing; the DSN itself lives in the Secret)
+  AEGIS_DB_ECHO: "false"
+  AEGIS_DB_POOL_SIZE: "10"
+  AEGIS_DB_MAX_OVERFLOW: "20"
+
+  # Self-healing engine (the Anthropic API key itself lives in the Secret)
+  AEGIS_HEALING_ENABLED: "true"
+  AEGIS_HEALING_MODEL: "claude-opus-4-8"
+  AEGIS_HEALING_MIN_CONFIDENCE: "0.6"
+  AEGIS_HEALING_MAX_ATTEMPTS: "3"
+  AEGIS_HEALING_LLM_TIMEOUT_SECONDS: "20.0"
+
+  # Worker
+  AEGIS_WORKER_CONCURRENCY: "8"
+  AEGIS_RUN_MAX_RETRIES: "2"
+  AEGIS_RUN_STEP_TIMEOUT_SECONDS: "30.0"
+
+  # Observability
+  AEGIS_METRICS_ENABLED: "true"
+  AEGIS_TRACING_ENABLED: "false"
+  AEGIS_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4317"
+
+  # HTTP / CORS (comma-separated; parsed by the cors_origins validator)
+  AEGIS_CORS_ORIGINS: "https://aegis.example.com"
+
+  # Rate limiting
+  AEGIS_RATE_LIMIT_ENABLED: "true"
+  AEGIS_RATE_LIMIT_REQUESTS: "120"
+  AEGIS_RATE_LIMIT_WINDOW_SECONDS: "60"

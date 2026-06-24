@@ -1,0 +1,208 @@
+# Default values for the Aegis Helm chart.
+# Override with --set or a custom values file: helm install aegis ./deploy/helm/aegis -f my-values.yaml
+
+# -- Container image shared by the API and worker deployments.
+image:
+  repository: ghcr.io/rohit-saxena/aegis-platform
+  tag: ""            # defaults to .Chart.AppVersion when empty
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# -- Override the chart name / fullname used to prefix resources.
+nameOverride: ""
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# API deployment
+# ---------------------------------------------------------------------------
+api:
+  replicaCount: 2
+  command: ["aegis", "serve", "--host", "0.0.0.0", "--port", "8000"]
+  containerPort: 8000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /healthz
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 30
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: "8000"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Worker deployment (arq)
+# ---------------------------------------------------------------------------
+worker:
+  enabled: true
+  replicaCount: 2
+  command: ["arq", "aegis.workers.arq_worker.WorkerSettings"]
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Database migrations — run as a pre-install/pre-upgrade Helm hook Job so the
+# schema is always applied before the API/worker roll out.
+# ---------------------------------------------------------------------------
+migrations:
+  enabled: true
+  command: ["alembic", "upgrade", "head"]
+
+# ---------------------------------------------------------------------------
+# Pod / container security
+# ---------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# ---------------------------------------------------------------------------
+# Service
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 80
+
+# ---------------------------------------------------------------------------
+# ServiceAccount
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""           # defaults to the chart fullname when empty
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Ingress (nginx)
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  hosts:
+    - host: aegis.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: aegis-tls
+      hosts:
+        - aegis.example.com
+
+# ---------------------------------------------------------------------------
+# Horizontal Pod Autoscaler (API)
+# ---------------------------------------------------------------------------
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  # targetMemoryUtilizationPercentage: 80
+
+# ---------------------------------------------------------------------------
+# PodDisruptionBudget
+# ---------------------------------------------------------------------------
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ---------------------------------------------------------------------------
+# Non-secret configuration -> AEGIS_* env (rendered into a ConfigMap).
+# ---------------------------------------------------------------------------
+config:
+  AEGIS_APP_NAME: "Aegis"
+  AEGIS_ENVIRONMENT: "production"
+  AEGIS_DEBUG: "false"
+  AEGIS_API_V1_PREFIX: "/api/v1"
+  AEGIS_LOG_LEVEL: "INFO"
+  AEGIS_LOG_JSON: "true"
+  AEGIS_JWT_ALGORITHM: "HS256"
+  AEGIS_ACCESS_TOKEN_TTL_SECONDS: "900"
+  AEGIS_REFRESH_TOKEN_TTL_SECONDS: "1209600"
+  AEGIS_DB_POOL_SIZE: "10"
+  AEGIS_DB_MAX_OVERFLOW: "20"
+  AEGIS_HEALING_ENABLED: "true"
+  AEGIS_HEALING_MODEL: "claude-opus-4-8"
+  AEGIS_HEALING_MIN_CONFIDENCE: "0.6"
+  AEGIS_HEALING_MAX_ATTEMPTS: "3"
+  AEGIS_WORKER_CONCURRENCY: "8"
+  AEGIS_METRICS_ENABLED: "true"
+  AEGIS_TRACING_ENABLED: "false"
+  AEGIS_CORS_ORIGINS: "https://aegis.example.com"
+  AEGIS_RATE_LIMIT_ENABLED: "true"
+  AEGIS_RATE_LIMIT_REQUESTS: "120"
+  AEGIS_RATE_LIMIT_WINDOW_SECONDS: "60"
+
+# ---------------------------------------------------------------------------
+# Secrets -> AEGIS_* env (rendered into a Secret).
+# In production, prefer existingSecret and leave these empty / managed via a
+# sealed-secret or external secrets operator.
+# ---------------------------------------------------------------------------
+secrets:
+  # When set, the chart references this pre-existing Secret instead of creating one.
+  existingSecret: ""
+  data:
+    AEGIS_SECRET_KEY: "change-me-please-use-a-long-random-string"
+    AEGIS_ANTHROPIC_API_KEY: ""
+    AEGIS_DATABASE_URL: "postgresql+asyncpg://aegis:aegis@aegis-postgres:5432/aegis"
+    AEGIS_REDIS_URL: "redis://aegis-redis:6379/0"
+
+# ---------------------------------------------------------------------------
+# Bundled dependency toggles. These charts are NOT subcharts here — the flags
+# act as documentation/guards and feed connection defaults. Set to false when
+# pointing at managed PostgreSQL / Redis via the secrets above.
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: false
+redis:
+  enabled: false
